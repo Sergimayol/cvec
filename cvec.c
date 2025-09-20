@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <math.h>
 #include <assert.h>
+// #include <omp.h>
 
 typedef struct
 {
@@ -175,46 +176,68 @@ void matmul_2d_batch(NDArray *a, NDArray *b, NDArray *res, int *batch_indices, i
             int c_idx = res_row_offset + j * res->strides[res->ndim - 1];
 
             float sum = 0;
+            float *a_ptr = a->data + a_row_offset;
+            float *b_ptr = b->data + b_col_offset;
             for (int k = 0; k < K; k++)
             {
-                int a_idx = a_row_offset + k * a->strides[a->ndim - 1];
-                int b_idx = b_col_offset + k * b->strides[b->ndim - 2];
-                sum += a->data[a_idx] * b->data[b_idx];
+                sum += a_ptr[k] * b_ptr[k * b->strides[b->ndim - 2]];
             }
+
+            // for (int k = 0; k < K; k++)
+            // {
+            //     int a_idx = a_row_offset + k * a->strides[a->ndim - 1];
+            //     int b_idx = b_col_offset + k * b->strides[b->ndim - 2];
+            //     sum += a->data[a_idx] * b->data[b_idx];
+            // }
 
             res->data[c_idx] = sum;
         }
     }
 }
 
-void matmul_nd_recursive(NDArray *a, NDArray *b, NDArray *res, int *batch_indices, int dim, int ndim_batch)
+void matmul_nd_iterative(NDArray *a, NDArray *b, NDArray *res)
 {
-    if (dim == ndim_batch)
+    int ndim_batch = a->ndim - 2;
+
+    int total_batches = 1;
+    for (int i = 0; i < ndim_batch; i++)
     {
-        matmul_2d_batch(a, b, res, batch_indices, ndim_batch);
-        return;
+        total_batches *= a->shape[i];
     }
 
-    for (int i = 0; i < a->shape[dim]; i++)
+    // Array para representar los índices multidimensionales del batch
+    int *batch_indices = calloc(ndim_batch, sizeof(int));
+
+    #pragma omp parallel for schedule(static)
+    for (int batch = 0; batch < total_batches; batch++)
     {
-        batch_indices[dim] = i;
-        matmul_nd_recursive(a, b, res, batch_indices, dim + 1, ndim_batch);
+        // Convertir índice lineal a índices multidimensionales
+        int rem = batch;
+        for (int d = ndim_batch - 1; d >= 0; d--)
+        {
+            batch_indices[d] = rem % a->shape[d];
+            rem /= a->shape[d];
+        }
+
+        matmul_2d_batch(a, b, res, batch_indices, ndim_batch);
     }
+
+    free(batch_indices);
 }
 
-NDArray *ndarray_matmul_nd(NDArray *a, NDArray *b)
+NDArray *ndarray_matmul(NDArray *a, NDArray *b)
 {
     assert(a->ndim >= 2 && b->ndim >= 2);
     assert(a->shape[a->ndim - 1] == b->shape[b->ndim - 2]);
 
     int ndim_batch = a->ndim - 2;
-    int result_ndim = a->ndim > b->ndim ? a->ndim : b->ndim;
+    assert(a->ndim == b->ndim);
+    int result_ndim = a->ndim;
+
     int *result_shape = malloc(result_ndim * sizeof(int));
 
     for (int i = 0; i < ndim_batch; i++)
-    {
         result_shape[i] = a->shape[i];
-    }
 
     result_shape[result_ndim - 2] = a->shape[a->ndim - 2];
     result_shape[result_ndim - 1] = b->shape[b->ndim - 1];
@@ -222,9 +245,7 @@ NDArray *ndarray_matmul_nd(NDArray *a, NDArray *b)
     NDArray *res = ndarray_create(result_ndim, result_shape);
     free(result_shape);
 
-    int *batch_indices = calloc(ndim_batch, sizeof(int));
-    matmul_nd_recursive(a, b, res, batch_indices, 0, ndim_batch);
-    free(batch_indices);
+    matmul_nd_iterative(a, b, res);
 
     return res;
 }
@@ -255,7 +276,7 @@ int main()
     ndarray_print(b);
     printf("\n");
 
-    NDArray *res = ndarray_matmul_nd(a, b);
+    NDArray *res = ndarray_matmul(a, b);
 
     printf("result = ");
     ndarray_print(res);
