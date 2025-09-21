@@ -56,3 +56,5 @@ dkms.conf
 
 cvec
 main
+tests
+!tests/
