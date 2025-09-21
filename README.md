@@ -1,6 +1,6 @@
 # CVEC
 
-A **header-only library** for vector and matrix operations in C.
+A simple **header-only library** for vector and matrix operations in C.
 
 ## Installation
 
