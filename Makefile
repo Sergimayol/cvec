@@ -1,7 +1,7 @@
 CC = gcc
 CFLAGS = -Wall -Wextra -O2 -fopenmp
-TARGET = cvec
-SRC = cvec.c
+TARGET = main
+SRC = main.c
 
 all: $(TARGET)
 

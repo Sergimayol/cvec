@@ -1,8 +1,10 @@
+#ifndef CVEC_H_
+#define CVEC_H_
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
 #include <assert.h>
-// #include <omp.h>
 
 typedef struct
 {
@@ -11,6 +13,17 @@ typedef struct
     int *strides; // how to move in memory for each dim
     float *data;  // data in contiguous form
 } NDArray;
+
+NDArray *ndarray_create(int ndim, int *shape);
+void ndarray_free(NDArray *arr);
+int ndarray_get_index(NDArray *arr, int *indices);
+float ndarray_get(NDArray *arr, int *indices);
+void ndarray_set(NDArray *arr, int *indices, float value);
+void ndarray_print(NDArray *arr);
+NDArray *ndarray_matmul_2d(NDArray *a, NDArray *b);
+NDArray *ndarray_matmul(NDArray *a, NDArray *b);
+
+#ifdef CVEC_IMPLEMENTATION
 
 NDArray *ndarray_create(int ndim, int *shape)
 {
@@ -123,6 +136,7 @@ void ndarray_print(NDArray *arr)
     free(indices);
 }
 
+// SAME AS ndarray_matmul
 NDArray *ndarray_matmul_2d(NDArray *a, NDArray *b)
 {
     assert(a->ndim == 2);
@@ -183,13 +197,6 @@ void matmul_2d_batch(NDArray *a, NDArray *b, NDArray *res, int *batch_indices, i
                 sum += a_ptr[k] * b_ptr[k * b->strides[b->ndim - 2]];
             }
 
-            // for (int k = 0; k < K; k++)
-            // {
-            //     int a_idx = a_row_offset + k * a->strides[a->ndim - 1];
-            //     int b_idx = b_col_offset + k * b->strides[b->ndim - 2];
-            //     sum += a->data[a_idx] * b->data[b_idx];
-            // }
-
             res->data[c_idx] = sum;
         }
     }
@@ -205,13 +212,13 @@ void matmul_nd_iterative(NDArray *a, NDArray *b, NDArray *res)
         total_batches *= a->shape[i];
     }
 
-    // Array para representar los índices multidimensionales del batch
+    // multidimensional indices from batch
     int *batch_indices = calloc(ndim_batch, sizeof(int));
 
-    #pragma omp parallel for schedule(static)
+#pragma omp parallel for schedule(static)
     for (int batch = 0; batch < total_batches; batch++)
     {
-        // Convertir índice lineal a índices multidimensionales
+        // lineal index to multidimensional index
         int rem = batch;
         for (int d = ndim_batch - 1; d >= 0; d--)
         {
@@ -249,41 +256,6 @@ NDArray *ndarray_matmul(NDArray *a, NDArray *b)
 
     return res;
 }
+#endif // CVEC_H_
 
-int main()
-{
-    int shape_a[3] = {2, 2, 3};
-    int shape_b[3] = {2, 3, 4};
-
-    NDArray *a = ndarray_create(3, shape_a);
-    NDArray *b = ndarray_create(3, shape_b);
-
-    for (int batch = 0; batch < 2; batch++)
-        for (int i = 0; i < 2; i++)
-            for (int k = 0; k < 3; k++)
-                a->data[batch * 6 + i * 3 + k] = batch + i + k;
-
-    printf("a = ");
-    ndarray_print(a);
-    printf("\n");
-
-    for (int batch = 0; batch < 2; batch++)
-        for (int k = 0; k < 3; k++)
-            for (int j = 0; j < 4; j++)
-                b->data[batch * 12 + k * 4 + j] = batch + k + j;
-
-    printf("b = ");
-    ndarray_print(b);
-    printf("\n");
-
-    NDArray *res = ndarray_matmul(a, b);
-
-    printf("result = ");
-    ndarray_print(res);
-
-    ndarray_free(a);
-    ndarray_free(b);
-    ndarray_free(res);
-
-    return 0;
-}
+#endif // CVEC_IMPLEMENTATION
