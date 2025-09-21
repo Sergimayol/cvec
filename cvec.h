@@ -82,63 +82,6 @@ void ndarray_set(NDArray *arr, int *indices, float value)
     arr->data[idx] = value;
 }
 
-void ndarray_print_pretty_recursive(NDArray *arr, int *indices, int dim, int indent)
-{
-    if (dim == arr->ndim)
-    {
-        printf("%.2f", ndarray_get(arr, indices));
-        return;
-    }
-
-    printf("[");
-    for (int i = 0; i < arr->shape[dim]; i++)
-    {
-        indices[dim] = i;
-
-        if (dim < arr->ndim - 1)
-        {
-            printf("\n");
-            for (int s = 0; s < indent + 2; s++)
-            {
-                printf(" ");
-            }
-        }
-
-        ndarray_print_pretty_recursive(arr, indices, dim + 1, indent + 2);
-
-        if (i != arr->shape[dim] - 1)
-            printf(", ");
-    }
-
-    if (dim < arr->ndim - 1)
-    {
-        printf("\n");
-        for (int s = 0; s < indent; s++)
-            printf(" ");
-    }
-    printf("]");
-}
-
-void ndarray_print(NDArray *arr)
-{
-    int *indices = calloc(arr->ndim, sizeof(int));
-    ndarray_print_pretty_recursive(arr, indices, 0, 0);
-    printf(", shape: (");
-    for (int i = 0; i < arr->ndim; i++)
-    {
-        if (i == 0)
-        {
-            printf("%d", arr->shape[i]);
-        }
-        else
-        {
-            printf(", %d", arr->shape[i]);
-        }
-    }
-    printf(") -> %d dims\n", arr->ndim);
-    free(indices);
-}
-
 NDArray *ndarray_matmul_2d(NDArray *a, NDArray *b)
 {
     assert(a->ndim == 2);
@@ -259,6 +202,63 @@ NDArray *ndarray_matmul(NDArray *a, NDArray *b)
     matmul_nd_iterative(a, b, res);
 
     return res;
+}
+
+void ndarray_print_pretty_recursive(NDArray *arr, int *indices, int dim, int indent)
+{
+    if (dim == arr->ndim)
+    {
+        printf("%.2f", ndarray_get(arr, indices));
+        return;
+    }
+
+    printf("[");
+    for (int i = 0; i < arr->shape[dim]; i++)
+    {
+        indices[dim] = i;
+
+        if (dim < arr->ndim - 1)
+        {
+            printf("\n");
+            for (int s = 0; s < indent + 2; s++)
+            {
+                printf(" ");
+            }
+        }
+
+        ndarray_print_pretty_recursive(arr, indices, dim + 1, indent + 2);
+
+        if (i != arr->shape[dim] - 1)
+            printf(", ");
+    }
+
+    if (dim < arr->ndim - 1)
+    {
+        printf("\n");
+        for (int s = 0; s < indent; s++)
+            printf(" ");
+    }
+    printf("]");
+}
+
+void ndarray_print(NDArray *arr)
+{
+    int *indices = calloc(arr->ndim, sizeof(int));
+    ndarray_print_pretty_recursive(arr, indices, 0, 0);
+    printf(", shape: (");
+    for (int i = 0; i < arr->ndim; i++)
+    {
+        if (i == 0)
+        {
+            printf("%d", arr->shape[i]);
+        }
+        else
+        {
+            printf(", %d", arr->shape[i]);
+        }
+    }
+    printf(") -> %d dims\n", arr->ndim);
+    free(indices);
 }
 #endif // CVEC_H_
 
