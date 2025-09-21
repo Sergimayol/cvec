@@ -4,6 +4,7 @@
 #include <assert.h>
 
 #define CVEC_IMPLEMENTATION
+#define CVEC_ALLOW_PARALLEL_OPS
 #include "cvec.h"
 
 int main()

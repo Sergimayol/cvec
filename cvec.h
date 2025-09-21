@@ -16,14 +16,17 @@ typedef struct
 
 NDArray *ndarray_create(int ndim, int *shape);
 void ndarray_free(NDArray *arr);
+
 int ndarray_get_index(NDArray *arr, int *indices);
 float ndarray_get(NDArray *arr, int *indices);
 void ndarray_set(NDArray *arr, int *indices, float value);
 void ndarray_print(NDArray *arr);
+
+// Same as ndarray_matmul
 NDArray *ndarray_matmul_2d(NDArray *a, NDArray *b);
 NDArray *ndarray_matmul(NDArray *a, NDArray *b);
 
-#ifdef CVEC_IMPLEMENTATION
+#ifdef CVEC_IMPLEMENTATION // CVEC_IMPLEMENTATION
 
 NDArray *ndarray_create(int ndim, int *shape)
 {
@@ -136,7 +139,6 @@ void ndarray_print(NDArray *arr)
     free(indices);
 }
 
-// SAME AS ndarray_matmul
 NDArray *ndarray_matmul_2d(NDArray *a, NDArray *b)
 {
     assert(a->ndim == 2);
@@ -215,7 +217,9 @@ void matmul_nd_iterative(NDArray *a, NDArray *b, NDArray *res)
     // multidimensional indices from batch
     int *batch_indices = calloc(ndim_batch, sizeof(int));
 
+#ifdef CVEC_ALLOW_PARALLEL_OPS
 #pragma omp parallel for schedule(static)
+#endif // CVEC_ALLOW_PARALLEL_OPS
     for (int batch = 0; batch < total_batches; batch++)
     {
         // lineal index to multidimensional index
