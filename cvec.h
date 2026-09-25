@@ -3,6 +3,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <stddef.h>
 #include <math.h>
 #include <assert.h>
 
@@ -27,7 +28,7 @@ void ndarray_print(NDArray *arr);
 NDArray *ndarray_matmul_2d(NDArray *a, NDArray *b);
 NDArray *ndarray_matmul(NDArray *a, NDArray *b);
 
-float ndarray_euclidean_distance(NDArray *a, NDArray *b);
+float ndarray_euclidean_distance(const NDArray *a, const NDArray *b);
 
 #ifdef CVEC_IMPLEMENTATION // CVEC_IMPLEMENTATION
 
@@ -211,54 +212,93 @@ NDArray *ndarray_matmul(NDArray *a, NDArray *b)
     return res;
 }
 
-float ndarray_euclidean_distance(NDArray *a, NDArray *b)
+// True if `arr` is laid out in C-contiguous (row-major) order.
+static int ndarray_is_contiguous(const NDArray *arr)
 {
-    assert(a->ndim == b->ndim);
-    for (size_t i = 0; i < a->ndim; i++)
+    ptrdiff_t expected = 1;
+    for (size_t i = arr->ndim; i-- > 0;)
     {
-        assert(a->shape[i] == b->shape[i]); // shapes must match
+        // The stride of a dim of size 1 is never used, so it can be anything
+        if (arr->shape[i] != 1 && arr->strides[i] != expected)
+        {
+            return 0;
+        }
+        expected *= arr->shape[i];
+    }
+    return 1;
+}
+
+// Returns NAN if the arguments are invalid (NULL, different ndim/shape) or
+// if memory allocation fails.
+float ndarray_euclidean_distance(const NDArray *a, const NDArray *b)
+{
+    if (!a || !b || a->ndim != b->ndim)
+    {
+        return NAN;
     }
 
     size_t ndim = a->ndim;
-    int *index = (int *)calloc(ndim, sizeof(int));
-    assert(index);
-    // TODO: Maybe check if calloc returns error
-
-    float sum = 0.0f;
-    int total = 1;
+    size_t total = 1;
     for (size_t i = 0; i < ndim; i++)
     {
-        total *= a->shape[i];
+        if (a->shape[i] != b->shape[i])
+        {
+            return NAN;
+        }
+        total *= (size_t)a->shape[i];
     }
 
-    for (int count = 0; count < total; count++)
+    if (total == 0)
     {
-        int offset_a = 0, offset_b = 0;
-        for (size_t d = 0; d < ndim; d++)
-        {
-            offset_a += index[d] * a->strides[d];
-            offset_b += index[d] * b->strides[d];
-        }
+        return 0.0f;
+    }
 
-        float diff = a->data[offset_a] - b->data[offset_b];
+    // Accumulate in double: summing many squares in float loses precision fast
+    double sum = 0.0;
+
+    // Fast path: both contiguous, so a single flat loop (easy to vectorize)
+    if (ndarray_is_contiguous(a) && ndarray_is_contiguous(b))
+    {
+        for (size_t i = 0; i < total; i++)
+        {
+            double diff = (double)a->data[i] - (double)b->data[i];
+            sum += diff * diff;
+        }
+        return (float)sqrt(sum);
+    }
+
+    // General path: walk the N-d index and keep the offsets up to date
+    // incrementally instead of recomputing them for every element.
+    int *index = (int *)calloc(ndim, sizeof(int));
+    if (!index)
+    {
+        return NAN;
+    }
+
+    ptrdiff_t offset_a = 0, offset_b = 0;
+    for (size_t count = 0; count < total; count++)
+    {
+        double diff = (double)a->data[offset_a] - (double)b->data[offset_b];
         sum += diff * diff;
 
-        for (int d = ndim - 1; d >= 0; d--)
+        for (size_t d = ndim; d-- > 0;)
         {
             index[d]++;
+            offset_a += a->strides[d];
+            offset_b += b->strides[d];
             if (index[d] < a->shape[d])
             {
                 break;
             }
-            else
-            {
-                index[d] = 0;
-            }
+            // wrap this dim back to 0 and carry into the previous one
+            offset_a -= (ptrdiff_t)a->shape[d] * a->strides[d];
+            offset_b -= (ptrdiff_t)b->shape[d] * b->strides[d];
+            index[d] = 0;
         }
     }
 
     free(index);
-    return sqrtf(sum);
+    return (float)sqrt(sum);
 }
 
 void ndarray_print_pretty_recursive(NDArray *arr, int *indices, size_t dim, int indent)

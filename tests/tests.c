@@ -178,6 +178,79 @@ void test_ndarray_euclidean_distance_3d()
     ndarray_free(b);
 }
 
+void test_ndarray_euclidean_distance_non_contiguous()
+{
+    // a is the transpose view of a 2x3 row-major buffer (shape 3x2, strides 1,3)
+    // a = [[1, 4],
+    //      [2, 5],
+    //      [3, 6]]
+    int shape[2] = {3, 2};
+    int strides_a[2] = {1, 3};
+    int strides_b[2] = {2, 1};
+
+    float data_a[6] = {1, 2, 3, 4, 5, 6};
+    float data_b[6] = {1, 4,
+                       2, 5,
+                       3, 9};
+
+    NDArray a = {2, shape, strides_a, data_a};
+    NDArray b = {2, shape, strides_b, data_b};
+
+    // only the last element differs: 6 vs 9
+    float dist = ndarray_euclidean_distance(&a, &b);
+    CHECK_FLOAT_NEAR(dist, 3.0f, EPS);
+
+    // both non-contiguous
+    dist = ndarray_euclidean_distance(&a, &a);
+    CHECK_FLOAT_NEAR(dist, 0.0f, EPS);
+
+    PASS("test_ndarray_euclidean_distance_non_contiguous");
+}
+
+void test_ndarray_euclidean_distance_invalid()
+{
+    int shape_a[2] = {2, 2};
+    int shape_b[2] = {2, 3};
+    int shape_c[1] = {4};
+    int strides[2] = {2, 1};
+    int strides_c[1] = {1};
+    float data[6] = {0};
+
+    NDArray a = {2, shape_a, strides, data};
+    NDArray b = {2, shape_b, strides, data};
+    NDArray c = {1, shape_c, strides_c, data};
+
+    if (!isnan(ndarray_euclidean_distance(&a, &b)))
+    {
+        fprintf(stderr, CROSS " different shapes should return NAN\n");
+        exit(1);
+    }
+    if (!isnan(ndarray_euclidean_distance(&a, &c)))
+    {
+        fprintf(stderr, CROSS " different ndim should return NAN\n");
+        exit(1);
+    }
+    if (!isnan(ndarray_euclidean_distance(NULL, &a)))
+    {
+        fprintf(stderr, CROSS " NULL should return NAN\n");
+        exit(1);
+    }
+
+    PASS("test_ndarray_euclidean_distance_invalid");
+}
+
+void test_ndarray_euclidean_distance_empty()
+{
+    int shape[2] = {0, 3};
+    int strides[2] = {3, 1};
+    NDArray a = {2, shape, strides, NULL};
+    NDArray b = {2, shape, strides, NULL};
+
+    CHECK_FLOAT_NEAR(ndarray_euclidean_distance(&a, &b), 0.0f, EPS);
+
+    PASS("test_ndarray_euclidean_distance_empty");
+}
+
 int main()
 {
     test_create_and_set();
@@ -186,6 +259,9 @@ int main()
     test_ndarray_euclidean_distance_1d();
     test_ndarray_euclidean_distance_2d();
     test_ndarray_euclidean_distance_3d();
+    test_ndarray_euclidean_distance_non_contiguous();
+    test_ndarray_euclidean_distance_invalid();
+    test_ndarray_euclidean_distance_empty();
 
     printf("All tests passed!\n");
     return 0;
