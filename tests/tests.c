@@ -1,4 +1,5 @@
 #define CVEC_IMPLEMENTATION
+#define CVEC_ALLOW_PARALLEL_OPS
 #include "cvec.h"
 
 #include <stdio.h>
@@ -101,6 +102,44 @@ void test_matmul_2d()
     CHECK_FLOAT_NEAR(ndarray_get(C, idxC), 154.0f, EPS);
 
     PASS("test_matmul_2d");
+
+    ndarray_free(A);
+    ndarray_free(B);
+    ndarray_free(C);
+}
+
+void test_matmul_batched()
+{
+    // Many batches so several threads run at once: batch `n` of A is filled
+    // with (n + 1) and B with ones, so every entry of C[n] is 3 * (n + 1).
+    // With a shared index buffer between threads the batches get mixed up.
+    const int batches = 256;
+    int shape_a[3] = {batches, 2, 3};
+    int shape_b[3] = {batches, 3, 2};
+
+    NDArray *A = ndarray_create(3, shape_a);
+    NDArray *B = ndarray_create(3, shape_b);
+
+    for (int n = 0; n < batches; n++)
+    {
+        for (int i = 0; i < 6; i++)
+        {
+            A->data[n * 6 + i] = (float)(n + 1);
+            B->data[n * 6 + i] = 1.0f;
+        }
+    }
+
+    NDArray *C = ndarray_matmul(A, B);
+
+    for (int n = 0; n < batches; n++)
+    {
+        for (int i = 0; i < 4; i++)
+        {
+            CHECK_FLOAT_NEAR(C->data[n * 4 + i], 3.0f * (n + 1), EPS);
+        }
+    }
+
+    PASS("test_matmul_batched");
 
     ndarray_free(A);
     ndarray_free(B);
@@ -255,6 +294,7 @@ int main()
 {
     test_create_and_set();
     test_matmul_2d();
+    test_matmul_batched();
 
     test_ndarray_euclidean_distance_1d();
     test_ndarray_euclidean_distance_2d();

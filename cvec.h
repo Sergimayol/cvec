@@ -165,26 +165,32 @@ void matmul_nd_iterative(NDArray *a, NDArray *b, NDArray *res)
         total_batches *= a->shape[i];
     }
 
-    // multidimensional indices from batch
-    int *batch_indices = calloc(ndim_batch, sizeof(int));
+#ifdef CVEC_ALLOW_PARALLEL_OPS
+#pragma omp parallel
+#endif // CVEC_ALLOW_PARALLEL_OPS
+    {
+        // multidimensional indices from batch, one buffer per thread so
+        // threads don't overwrite each other's indices
+        int *batch_indices = calloc(ndim_batch, sizeof(int));
 
 #ifdef CVEC_ALLOW_PARALLEL_OPS
-#pragma omp parallel for schedule(static)
+#pragma omp for schedule(static)
 #endif // CVEC_ALLOW_PARALLEL_OPS
-    for (int batch = 0; batch < total_batches; batch++)
-    {
-        // lineal index to multidimensional index
-        int rem = batch;
-        for (int d = ndim_batch - 1; d >= 0; d--)
+        for (int batch = 0; batch < total_batches; batch++)
         {
-            batch_indices[d] = rem % a->shape[d];
-            rem /= a->shape[d];
+            // lineal index to multidimensional index
+            int rem = batch;
+            for (int d = ndim_batch - 1; d >= 0; d--)
+            {
+                batch_indices[d] = rem % a->shape[d];
+                rem /= a->shape[d];
+            }
+
+            matmul_2d_batch(a, b, res, batch_indices, ndim_batch);
         }
 
-        matmul_2d_batch(a, b, res, batch_indices, ndim_batch);
+        free(batch_indices);
     }
-
-    free(batch_indices);
 }
 
 NDArray *ndarray_matmul(NDArray *a, NDArray *b)
