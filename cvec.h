@@ -3,15 +3,17 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <stddef.h>
 #include <math.h>
 #include <assert.h>
 
 typedef struct
 {
-    int ndim;     // num of dims
+    size_t ndim;  // num of dims
     int *shape;   // size of each dim
     int *strides; // how to move in memory for each dim
-    float *data;  // data in contiguous form
+    // TODO: Make `data` customizable depending on some dtype
+    float *data; // data in contiguous form
 } NDArray;
 
 NDArray *ndarray_create(int ndim, int *shape);
@@ -25,6 +27,8 @@ void ndarray_print(NDArray *arr);
 // Same as ndarray_matmul
 NDArray *ndarray_matmul_2d(NDArray *a, NDArray *b);
 NDArray *ndarray_matmul(NDArray *a, NDArray *b);
+
+float ndarray_euclidean_distance(const NDArray *a, const NDArray *b);
 
 #ifdef CVEC_IMPLEMENTATION // CVEC_IMPLEMENTATION
 
@@ -54,6 +58,10 @@ NDArray *ndarray_create(int ndim, int *shape)
 
 void ndarray_free(NDArray *arr)
 {
+    if (!arr)
+    {
+        return;
+    }
     free(arr->shape);
     free(arr->strides);
     free(arr->data);
@@ -63,7 +71,7 @@ void ndarray_free(NDArray *arr)
 int ndarray_get_index(NDArray *arr, int *indices)
 {
     int idx = 0;
-    for (int i = 0; i < arr->ndim; i++)
+    for (size_t i = 0; i < arr->ndim; i++)
     {
         idx += indices[i] * arr->strides[i];
     }
@@ -204,7 +212,96 @@ NDArray *ndarray_matmul(NDArray *a, NDArray *b)
     return res;
 }
 
-void ndarray_print_pretty_recursive(NDArray *arr, int *indices, int dim, int indent)
+// True if `arr` is laid out in C-contiguous (row-major) order.
+static int ndarray_is_contiguous(const NDArray *arr)
+{
+    ptrdiff_t expected = 1;
+    for (size_t i = arr->ndim; i-- > 0;)
+    {
+        // The stride of a dim of size 1 is never used, so it can be anything
+        if (arr->shape[i] != 1 && arr->strides[i] != expected)
+        {
+            return 0;
+        }
+        expected *= arr->shape[i];
+    }
+    return 1;
+}
+
+// Returns NAN if the arguments are invalid (NULL, different ndim/shape) or
+// if memory allocation fails.
+float ndarray_euclidean_distance(const NDArray *a, const NDArray *b)
+{
+    if (!a || !b || a->ndim != b->ndim)
+    {
+        return NAN;
+    }
+
+    size_t ndim = a->ndim;
+    size_t total = 1;
+    for (size_t i = 0; i < ndim; i++)
+    {
+        if (a->shape[i] != b->shape[i])
+        {
+            return NAN;
+        }
+        total *= (size_t)a->shape[i];
+    }
+
+    if (total == 0)
+    {
+        return 0.0f;
+    }
+
+    // Accumulate in double: summing many squares in float loses precision fast
+    double sum = 0.0;
+
+    // Fast path: both contiguous, so a single flat loop (easy to vectorize)
+    if (ndarray_is_contiguous(a) && ndarray_is_contiguous(b))
+    {
+        for (size_t i = 0; i < total; i++)
+        {
+            double diff = (double)a->data[i] - (double)b->data[i];
+            sum += diff * diff;
+        }
+        return (float)sqrt(sum);
+    }
+
+    // General path: walk the N-d index and keep the offsets up to date
+    // incrementally instead of recomputing them for every element.
+    int *index = (int *)calloc(ndim, sizeof(int));
+    if (!index)
+    {
+        return NAN;
+    }
+
+    ptrdiff_t offset_a = 0, offset_b = 0;
+    for (size_t count = 0; count < total; count++)
+    {
+        double diff = (double)a->data[offset_a] - (double)b->data[offset_b];
+        sum += diff * diff;
+
+        for (size_t d = ndim; d-- > 0;)
+        {
+            index[d]++;
+            offset_a += a->strides[d];
+            offset_b += b->strides[d];
+            if (index[d] < a->shape[d])
+            {
+                break;
+            }
+            // wrap this dim back to 0 and carry into the previous one
+            offset_a -= (ptrdiff_t)a->shape[d] * a->strides[d];
+            offset_b -= (ptrdiff_t)b->shape[d] * b->strides[d];
+            index[d] = 0;
+        }
+    }
+
+    free(index);
+    return (float)sqrt(sum);
+}
+
+void ndarray_print_pretty_recursive(NDArray *arr, int *indices, size_t dim, int indent)
 {
     if (dim == arr->ndim)
     {
@@ -246,7 +343,7 @@ void ndarray_print(NDArray *arr)
     int *indices = calloc(arr->ndim, sizeof(int));
     ndarray_print_pretty_recursive(arr, indices, 0, 0);
     printf(", shape: (");
-    for (int i = 0; i < arr->ndim; i++)
+    for (size_t i = 0; i < arr->ndim; i++)
     {
         if (i == 0)
         {
@@ -257,7 +354,7 @@ void ndarray_print(NDArray *arr)
             printf(", %d", arr->shape[i]);
         }
     }
-    printf(") -> %d dims\n", arr->ndim);
+    printf(") -> %ld dims\n", arr->ndim);
     free(indices);
 }
 #endif // CVEC_H_
