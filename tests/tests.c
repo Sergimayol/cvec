@@ -146,6 +146,32 @@ void test_matmul_batched()
     ndarray_free(C);
 }
 
+void test_matmul_invalid()
+{
+    int shape_a[3] = {4, 2, 3};
+    int shape_b[3] = {5, 3, 2}; // different batch dim
+    int shape_c[3] = {4, 2, 2}; // inner dims 3 vs 2
+    int shape_d[2] = {3, 2};    // different ndim
+
+    NDArray *A = ndarray_create(3, shape_a);
+    NDArray *B = ndarray_create(3, shape_b);
+    NDArray *C = ndarray_create(3, shape_c);
+    NDArray *D = ndarray_create(2, shape_d);
+
+    if (ndarray_matmul(A, B) || ndarray_matmul(A, C) || ndarray_matmul(A, D) || ndarray_matmul(NULL, A))
+    {
+        fprintf(stderr, CROSS " invalid matmul should return NULL\n");
+        exit(1);
+    }
+
+    PASS("test_matmul_invalid");
+
+    ndarray_free(A);
+    ndarray_free(B);
+    ndarray_free(C);
+    ndarray_free(D);
+}
+
 void test_ndarray_euclidean_distance_1d()
 {
     int shape[1] = {3};
@@ -295,6 +321,7 @@ int main()
     test_create_and_set();
     test_matmul_2d();
     test_matmul_batched();
+    test_matmul_invalid();
 
     test_ndarray_euclidean_distance_1d();
     test_ndarray_euclidean_distance_2d();

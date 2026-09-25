@@ -155,7 +155,8 @@ void matmul_2d_batch(NDArray *a, NDArray *b, NDArray *res, int *batch_indices, i
     }
 }
 
-void matmul_nd_iterative(NDArray *a, NDArray *b, NDArray *res)
+// Returns 0 on success, -1 if a per-thread buffer could not be allocated
+int matmul_nd_iterative(NDArray *a, NDArray *b, NDArray *res)
 {
     int ndim_batch = a->ndim - 2;
 
@@ -165,19 +166,35 @@ void matmul_nd_iterative(NDArray *a, NDArray *b, NDArray *res)
         total_batches *= a->shape[i];
     }
 
+    int failed = 0;
+
 #ifdef CVEC_ALLOW_PARALLEL_OPS
 #pragma omp parallel
 #endif // CVEC_ALLOW_PARALLEL_OPS
     {
         // multidimensional indices from batch, one buffer per thread so
         // threads don't overwrite each other's indices
-        int *batch_indices = calloc(ndim_batch, sizeof(int));
+        // (calloc(0) may return NULL, so always ask for at least one element)
+        int *batch_indices = calloc(ndim_batch > 0 ? ndim_batch : 1, sizeof(int));
+        if (!batch_indices)
+        {
+#ifdef CVEC_ALLOW_PARALLEL_OPS
+#pragma omp atomic write
+#endif // CVEC_ALLOW_PARALLEL_OPS
+            failed = 1;
+        }
 
 #ifdef CVEC_ALLOW_PARALLEL_OPS
 #pragma omp for schedule(static)
 #endif // CVEC_ALLOW_PARALLEL_OPS
         for (int batch = 0; batch < total_batches; batch++)
         {
+            // can't leave an `omp for` early, so skip the work instead
+            if (!batch_indices)
+            {
+                continue;
+            }
+
             // lineal index to multidimensional index
             int rem = batch;
             for (int d = ndim_batch - 1; d >= 0; d--)
@@ -191,18 +208,40 @@ void matmul_nd_iterative(NDArray *a, NDArray *b, NDArray *res)
 
         free(batch_indices);
     }
+
+    return failed ? -1 : 0;
 }
 
+// Returns NULL if the arguments are invalid (NULL, ndim < 2, different ndim,
+// different batch dims, mismatched inner dims) or if allocation fails.
 NDArray *ndarray_matmul(NDArray *a, NDArray *b)
 {
-    assert(a->ndim >= 2 && b->ndim >= 2);
-    assert(a->shape[a->ndim - 1] == b->shape[b->ndim - 2]);
+    if (!a || !b || a->ndim < 2 || a->ndim != b->ndim)
+    {
+        return NULL;
+    }
 
     int ndim_batch = a->ndim - 2;
-    assert(a->ndim == b->ndim);
+    for (int i = 0; i < ndim_batch; i++)
+    {
+        // matmul_2d_batch uses the same batch indices for a, b and res
+        if (a->shape[i] != b->shape[i])
+        {
+            return NULL;
+        }
+    }
+    if (a->shape[a->ndim - 1] != b->shape[b->ndim - 2])
+    {
+        return NULL;
+    }
+
     int result_ndim = a->ndim;
 
     int *result_shape = malloc(result_ndim * sizeof(int));
+    if (!result_shape)
+    {
+        return NULL;
+    }
 
     for (int i = 0; i < ndim_batch; i++)
         result_shape[i] = a->shape[i];
@@ -213,7 +252,11 @@ NDArray *ndarray_matmul(NDArray *a, NDArray *b)
     NDArray *res = ndarray_create(result_ndim, result_shape);
     free(result_shape);
 
-    matmul_nd_iterative(a, b, res);
+    if (matmul_nd_iterative(a, b, res) != 0)
+    {
+        ndarray_free(res);
+        return NULL;
+    }
 
     return res;
 }
