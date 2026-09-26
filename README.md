@@ -18,6 +18,21 @@ To use this library work like a [nothings/stb](https://github.com/nothings/stb) 
 | `CVEC_IMPLEMENTATION`     | Must be defined in **one** source file to compile the implementation. |
 | `CVEC_ALLOW_PARALLEL_OPS` | Enables parallel operations (requires OpenMP).                        |
 
+## Naming
+
+Everything the library exposes is prefixed with `cvec_` (types, functions) or `CVEC_` (macros and enum values), e.g. `cvec_NDArray`, `cvec_ndarray_create`, `CVEC_OK`. Internal helpers use `cvec__` and are `static`.
+
+## Error handling
+
+Functions never abort on bad input (NULL pointers, incompatible shapes, indices out of range, failed allocations). Instead:
+
+| Return type        | On error                                                         |
+| ------------------ | ---------------------------------------------------------------- |
+| pointer            | `NULL` (`cvec_ndarray_create`, `cvec_ndarray_matmul`, ...)       |
+| `float`            | `NAN` (`cvec_ndarray_get`, `cvec_ndarray_euclidean_distance`)    |
+| `cvec_status`      | `CVEC_ERR_NULL`, `CVEC_ERR_INDEX` or `CVEC_ERR_ALLOC`            |
+| `ptrdiff_t` index  | `-1` (`cvec_ndarray_get_index`)                                  |
+
 ## Example
 
 ```c
@@ -30,8 +45,8 @@ int main()
     int shape_a[3] = {2, 2, 3};
     int shape_b[3] = {2, 3, 4};
 
-    NDArray *a = ndarray_create(3, shape_a);
-    NDArray *b = ndarray_create(3, shape_b);
+    cvec_NDArray *a = cvec_ndarray_create(3, shape_a);
+    cvec_NDArray *b = cvec_ndarray_create(3, shape_b);
 
     for (int batch = 0; batch < 2; batch++)
         for (int i = 0; i < 2; i++)
@@ -39,7 +54,7 @@ int main()
                 a->data[batch * 6 + i * 3 + k] = batch + i + k;
 
     printf("a = ");
-    ndarray_print(a);
+    cvec_ndarray_print(a);
     printf("\n");
 
     for (int batch = 0; batch < 2; batch++)
@@ -48,17 +63,17 @@ int main()
                 b->data[batch * 12 + k * 4 + j] = batch + k + j;
 
     printf("b = ");
-    ndarray_print(b);
+    cvec_ndarray_print(b);
     printf("\n");
 
-    NDArray *res = ndarray_matmul(a, b);
+    cvec_NDArray *res = cvec_ndarray_matmul(a, b);
 
     printf("result = ");
-    ndarray_print(res);
+    cvec_ndarray_print(res);
 
-    ndarray_free(a);
-    ndarray_free(b);
-    ndarray_free(res);
+    cvec_ndarray_free(a);
+    cvec_ndarray_free(b);
+    cvec_ndarray_free(res);
 
     return 0;
 }
