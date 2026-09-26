@@ -7,8 +7,8 @@ int main()
     int shape_a[3] = {2, 2, 3};
     int shape_b[3] = {2, 3, 4};
 
-    NDArray *a = ndarray_create(3, shape_a);
-    NDArray *b = ndarray_create(3, shape_b);
+    cvec_NDArray *a = cvec_ndarray_create(3, shape_a);
+    cvec_NDArray *b = cvec_ndarray_create(3, shape_b);
 
     for (int batch = 0; batch < 2; batch++)
         for (int i = 0; i < 2; i++)
@@ -16,7 +16,7 @@ int main()
                 a->data[batch * 6 + i * 3 + k] = batch + i + k;
 
     printf("a = ");
-    ndarray_print(a);
+    cvec_ndarray_print(a);
     printf("\n");
 
     for (int batch = 0; batch < 2; batch++)
@@ -25,17 +25,17 @@ int main()
                 b->data[batch * 12 + k * 4 + j] = batch + k + j;
 
     printf("b = ");
-    ndarray_print(b);
+    cvec_ndarray_print(b);
     printf("\n");
 
-    NDArray *res = ndarray_matmul(a, b);
+    cvec_NDArray *res = cvec_ndarray_matmul(a, b);
 
     printf("result = ");
-    ndarray_print(res);
+    cvec_ndarray_print(res);
 
-    ndarray_free(a);
-    ndarray_free(b);
-    ndarray_free(res);
+    cvec_ndarray_free(a);
+    cvec_ndarray_free(b);
+    cvec_ndarray_free(res);
 
     return 0;
 }

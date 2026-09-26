@@ -4,8 +4,27 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stddef.h>
+#include <stdint.h>
+#include <limits.h>
 #include <math.h>
-#include <assert.h>
+
+// Error handling convention
+// -------------------------
+// No function in this library aborts on bad input. Instead:
+//   - functions returning a pointer return NULL,
+//   - functions returning a float return NAN,
+//   - functions that only report success return a `cvec_status`,
+//   - `cvec_ndarray_get_index` returns -1.
+// "Bad input" means a NULL pointer, incompatible shapes, an index out of
+// range or a failed memory allocation.
+
+typedef enum
+{
+    CVEC_OK = 0,
+    CVEC_ERR_NULL = -1,  // a required pointer argument was NULL
+    CVEC_ERR_INDEX = -2, // an index was out of range
+    CVEC_ERR_ALLOC = -3, // a memory allocation failed
+} cvec_status;
 
 typedef struct
 {
@@ -14,49 +33,90 @@ typedef struct
     int *strides; // how to move in memory for each dim
     // TODO: Make `data` customizable depending on some dtype
     float *data; // data in contiguous form
-} NDArray;
+} cvec_NDArray;
 
-NDArray *ndarray_create(int ndim, int *shape);
-void ndarray_free(NDArray *arr);
+// Creates a zero-filled C-contiguous array. Returns NULL if `ndim` < 1, if
+// `shape` is NULL or has a negative entry, if the number of elements does not
+// fit in an `int` (strides are `int`), or if allocation fails.
+cvec_NDArray *cvec_ndarray_create(int ndim, const int *shape);
+void cvec_ndarray_free(cvec_NDArray *arr);
 
-int ndarray_get_index(NDArray *arr, int *indices);
-float ndarray_get(NDArray *arr, int *indices);
-void ndarray_set(NDArray *arr, int *indices, float value);
-void ndarray_print(NDArray *arr);
+// `indices` must have `arr->ndim` entries. Returns -1 if `arr` or `indices`
+// is NULL or any index is out of range.
+ptrdiff_t cvec_ndarray_get_index(const cvec_NDArray *arr, const int *indices);
+// Returns NAN if the index is invalid.
+float cvec_ndarray_get(const cvec_NDArray *arr, const int *indices);
+cvec_status cvec_ndarray_set(cvec_NDArray *arr, const int *indices, float value);
+void cvec_ndarray_print(const cvec_NDArray *arr);
 
-// Same as ndarray_matmul
-NDArray *ndarray_matmul_2d(NDArray *a, NDArray *b);
-NDArray *ndarray_matmul(NDArray *a, NDArray *b);
+// Returns NULL if the arguments are invalid or allocation fails.
+// Same as cvec_ndarray_matmul for 2D inputs
+cvec_NDArray *cvec_ndarray_matmul_2d(const cvec_NDArray *a, const cvec_NDArray *b);
+cvec_NDArray *cvec_ndarray_matmul(const cvec_NDArray *a, const cvec_NDArray *b);
 
-float ndarray_euclidean_distance(const NDArray *a, const NDArray *b);
+// Returns NAN if the arguments are invalid or allocation fails.
+float cvec_ndarray_euclidean_distance(const cvec_NDArray *a, const cvec_NDArray *b);
 
-#ifdef CVEC_IMPLEMENTATION // CVEC_IMPLEMENTATION
+#endif // CVEC_H_
 
-NDArray *ndarray_create(int ndim, int *shape)
+#ifdef CVEC_IMPLEMENTATION
+
+cvec_NDArray *cvec_ndarray_create(int ndim, const int *shape)
 {
-    NDArray *arr = malloc(sizeof(NDArray));
-    arr->ndim = ndim;
-
-    arr->shape = malloc(ndim * sizeof(int));
-    for (int i = 0; i < ndim; i++)
+    if (ndim < 1 || !shape)
     {
-        arr->shape[i] = shape[i];
+        return NULL;
     }
 
-    arr->strides = malloc(ndim * sizeof(int));
+    // Strides are `int`, so the element count (and every partial product used
+    // to build the strides) must fit in an `int`.
+    size_t total = 1;
+    for (int i = 0; i < ndim; i++)
+    {
+        if (shape[i] < 0)
+        {
+            return NULL;
+        }
+        if (shape[i] != 0 && total > (size_t)INT_MAX / (size_t)shape[i])
+        {
+            return NULL;
+        }
+        total *= (size_t)shape[i];
+    }
+    if (total > SIZE_MAX / sizeof(float))
+    {
+        return NULL;
+    }
+
+    cvec_NDArray *arr = malloc(sizeof(cvec_NDArray));
+    if (!arr)
+    {
+        return NULL;
+    }
+
+    arr->ndim = (size_t)ndim;
+    arr->shape = malloc((size_t)ndim * sizeof(int));
+    arr->strides = malloc((size_t)ndim * sizeof(int));
+    // calloc(0) may return NULL, so always ask for at least one element
+    arr->data = calloc(total > 0 ? total : 1, sizeof(float));
+    if (!arr->shape || !arr->strides || !arr->data)
+    {
+        cvec_ndarray_free(arr);
+        return NULL;
+    }
+
     int stride = 1;
     for (int i = ndim - 1; i >= 0; i--)
     {
+        arr->shape[i] = shape[i];
         arr->strides[i] = stride;
         stride *= shape[i];
     }
 
-    arr->data = calloc(stride, sizeof(float));
-
     return arr;
 }
 
-void ndarray_free(NDArray *arr)
+void cvec_ndarray_free(cvec_NDArray *arr)
 {
     if (!arr)
     {
@@ -68,36 +128,63 @@ void ndarray_free(NDArray *arr)
     free(arr);
 }
 
-int ndarray_get_index(NDArray *arr, int *indices)
+ptrdiff_t cvec_ndarray_get_index(const cvec_NDArray *arr, const int *indices)
 {
-    int idx = 0;
+    if (!arr || !indices)
+    {
+        return -1;
+    }
+
+    ptrdiff_t idx = 0;
     for (size_t i = 0; i < arr->ndim; i++)
     {
-        idx += indices[i] * arr->strides[i];
+        if (indices[i] < 0 || indices[i] >= arr->shape[i])
+        {
+            return -1;
+        }
+        idx += (ptrdiff_t)indices[i] * arr->strides[i];
     }
     return idx;
 }
 
-float ndarray_get(NDArray *arr, int *indices)
+float cvec_ndarray_get(const cvec_NDArray *arr, const int *indices)
 {
-    int idx = ndarray_get_index(arr, indices);
+    ptrdiff_t idx = cvec_ndarray_get_index(arr, indices);
+    if (idx < 0)
+    {
+        return NAN;
+    }
     return arr->data[idx];
 }
 
-void ndarray_set(NDArray *arr, int *indices, float value)
+cvec_status cvec_ndarray_set(cvec_NDArray *arr, const int *indices, float value)
 {
-    int idx = ndarray_get_index(arr, indices);
+    if (!arr || !indices)
+    {
+        return CVEC_ERR_NULL;
+    }
+    ptrdiff_t idx = cvec_ndarray_get_index(arr, indices);
+    if (idx < 0)
+    {
+        return CVEC_ERR_INDEX;
+    }
     arr->data[idx] = value;
+    return CVEC_OK;
 }
 
-NDArray *ndarray_matmul_2d(NDArray *a, NDArray *b)
+cvec_NDArray *cvec_ndarray_matmul_2d(const cvec_NDArray *a, const cvec_NDArray *b)
 {
-    assert(a->ndim == 2);
-    assert(b->ndim == 2);
-    assert(a->shape[1] == b->shape[0]);
+    if (!a || !b || a->ndim != 2 || b->ndim != 2 || a->shape[1] != b->shape[0])
+    {
+        return NULL;
+    }
 
     int result_shape[2] = {a->shape[0], b->shape[1]};
-    NDArray *result = ndarray_create(2, result_shape);
+    cvec_NDArray *result = cvec_ndarray_create(2, result_shape);
+    if (!result)
+    {
+        return NULL;
+    }
 
     for (int i = 0; i < a->shape[0]; i++)
     {
@@ -118,7 +205,8 @@ NDArray *ndarray_matmul_2d(NDArray *a, NDArray *b)
     return result;
 }
 
-void matmul_2d_batch(NDArray *a, NDArray *b, NDArray *res, int *batch_indices, int ndim_batch)
+static void cvec__matmul_2d_batch(const cvec_NDArray *a, const cvec_NDArray *b, cvec_NDArray *res,
+                                  const int *batch_indices, int ndim_batch)
 {
     int M = a->shape[a->ndim - 2];
     int K = a->shape[a->ndim - 1];
@@ -143,11 +231,11 @@ void matmul_2d_batch(NDArray *a, NDArray *b, NDArray *res, int *batch_indices, i
             int c_idx = res_row_offset + j * res->strides[res->ndim - 1];
 
             float sum = 0;
-            float *a_ptr = a->data + a_row_offset;
-            float *b_ptr = b->data + b_col_offset;
+            const float *a_ptr = a->data + a_row_offset;
+            const float *b_ptr = b->data + b_col_offset;
             for (int k = 0; k < K; k++)
             {
-                sum += a_ptr[k] * b_ptr[k * b->strides[b->ndim - 2]];
+                sum += a_ptr[k * a->strides[a->ndim - 1]] * b_ptr[k * b->strides[b->ndim - 2]];
             }
 
             res->data[c_idx] = sum;
@@ -155,10 +243,10 @@ void matmul_2d_batch(NDArray *a, NDArray *b, NDArray *res, int *batch_indices, i
     }
 }
 
-// Returns 0 on success, -1 if a per-thread buffer could not be allocated
-int matmul_nd_iterative(NDArray *a, NDArray *b, NDArray *res)
+// Returns CVEC_ERR_ALLOC if a per-thread buffer could not be allocated
+static cvec_status cvec__matmul_nd_iterative(const cvec_NDArray *a, const cvec_NDArray *b, cvec_NDArray *res)
 {
-    int ndim_batch = a->ndim - 2;
+    int ndim_batch = (int)a->ndim - 2;
 
     int total_batches = 1;
     for (int i = 0; i < ndim_batch; i++)
@@ -175,7 +263,7 @@ int matmul_nd_iterative(NDArray *a, NDArray *b, NDArray *res)
         // multidimensional indices from batch, one buffer per thread so
         // threads don't overwrite each other's indices
         // (calloc(0) may return NULL, so always ask for at least one element)
-        int *batch_indices = calloc(ndim_batch > 0 ? ndim_batch : 1, sizeof(int));
+        int *batch_indices = calloc(ndim_batch > 0 ? (size_t)ndim_batch : 1, sizeof(int));
         if (!batch_indices)
         {
 #ifdef CVEC_ALLOW_PARALLEL_OPS
@@ -203,28 +291,26 @@ int matmul_nd_iterative(NDArray *a, NDArray *b, NDArray *res)
                 rem /= a->shape[d];
             }
 
-            matmul_2d_batch(a, b, res, batch_indices, ndim_batch);
+            cvec__matmul_2d_batch(a, b, res, batch_indices, ndim_batch);
         }
 
         free(batch_indices);
     }
 
-    return failed ? -1 : 0;
+    return failed ? CVEC_ERR_ALLOC : CVEC_OK;
 }
 
-// Returns NULL if the arguments are invalid (NULL, ndim < 2, different ndim,
-// different batch dims, mismatched inner dims) or if allocation fails.
-NDArray *ndarray_matmul(NDArray *a, NDArray *b)
+cvec_NDArray *cvec_ndarray_matmul(const cvec_NDArray *a, const cvec_NDArray *b)
 {
     if (!a || !b || a->ndim < 2 || a->ndim != b->ndim)
     {
         return NULL;
     }
 
-    int ndim_batch = a->ndim - 2;
+    int ndim_batch = (int)a->ndim - 2;
     for (int i = 0; i < ndim_batch; i++)
     {
-        // matmul_2d_batch uses the same batch indices for a, b and res
+        // cvec__matmul_2d_batch uses the same batch indices for a, b and res
         if (a->shape[i] != b->shape[i])
         {
             return NULL;
@@ -235,9 +321,9 @@ NDArray *ndarray_matmul(NDArray *a, NDArray *b)
         return NULL;
     }
 
-    int result_ndim = a->ndim;
+    int result_ndim = (int)a->ndim;
 
-    int *result_shape = malloc(result_ndim * sizeof(int));
+    int *result_shape = malloc((size_t)result_ndim * sizeof(int));
     if (!result_shape)
     {
         return NULL;
@@ -249,12 +335,16 @@ NDArray *ndarray_matmul(NDArray *a, NDArray *b)
     result_shape[result_ndim - 2] = a->shape[a->ndim - 2];
     result_shape[result_ndim - 1] = b->shape[b->ndim - 1];
 
-    NDArray *res = ndarray_create(result_ndim, result_shape);
+    cvec_NDArray *res = cvec_ndarray_create(result_ndim, result_shape);
     free(result_shape);
-
-    if (matmul_nd_iterative(a, b, res) != 0)
+    if (!res)
     {
-        ndarray_free(res);
+        return NULL;
+    }
+
+    if (cvec__matmul_nd_iterative(a, b, res) != CVEC_OK)
+    {
+        cvec_ndarray_free(res);
         return NULL;
     }
 
@@ -262,7 +352,7 @@ NDArray *ndarray_matmul(NDArray *a, NDArray *b)
 }
 
 // True if `arr` is laid out in C-contiguous (row-major) order.
-static int ndarray_is_contiguous(const NDArray *arr)
+static int cvec__is_contiguous(const cvec_NDArray *arr)
 {
     ptrdiff_t expected = 1;
     for (size_t i = arr->ndim; i-- > 0;)
@@ -277,9 +367,7 @@ static int ndarray_is_contiguous(const NDArray *arr)
     return 1;
 }
 
-// Returns NAN if the arguments are invalid (NULL, different ndim/shape) or
-// if memory allocation fails.
-float ndarray_euclidean_distance(const NDArray *a, const NDArray *b)
+float cvec_ndarray_euclidean_distance(const cvec_NDArray *a, const cvec_NDArray *b)
 {
     if (!a || !b || a->ndim != b->ndim)
     {
@@ -301,12 +389,16 @@ float ndarray_euclidean_distance(const NDArray *a, const NDArray *b)
     {
         return 0.0f;
     }
+    if (!a->data || !b->data)
+    {
+        return NAN;
+    }
 
     // Accumulate in double: summing many squares in float loses precision fast
     double sum = 0.0;
 
     // Fast path: both contiguous, so a single flat loop (easy to vectorize)
-    if (ndarray_is_contiguous(a) && ndarray_is_contiguous(b))
+    if (cvec__is_contiguous(a) && cvec__is_contiguous(b))
     {
         for (size_t i = 0; i < total; i++)
         {
@@ -350,11 +442,11 @@ float ndarray_euclidean_distance(const NDArray *a, const NDArray *b)
     return (float)sqrt(sum);
 }
 
-void ndarray_print_pretty_recursive(NDArray *arr, int *indices, size_t dim, int indent)
+static void cvec__print_recursive(const cvec_NDArray *arr, int *indices, size_t dim, int indent)
 {
     if (dim == arr->ndim)
     {
-        printf("%.2f", ndarray_get(arr, indices));
+        printf("%.2f", cvec_ndarray_get(arr, indices));
         return;
     }
 
@@ -372,7 +464,7 @@ void ndarray_print_pretty_recursive(NDArray *arr, int *indices, size_t dim, int 
             }
         }
 
-        ndarray_print_pretty_recursive(arr, indices, dim + 1, indent + 2);
+        cvec__print_recursive(arr, indices, dim + 1, indent + 2);
 
         if (i != arr->shape[dim] - 1)
             printf(", ");
@@ -387,10 +479,20 @@ void ndarray_print_pretty_recursive(NDArray *arr, int *indices, size_t dim, int 
     printf("]");
 }
 
-void ndarray_print(NDArray *arr)
+void cvec_ndarray_print(const cvec_NDArray *arr)
 {
-    int *indices = calloc(arr->ndim, sizeof(int));
-    ndarray_print_pretty_recursive(arr, indices, 0, 0);
+    if (!arr)
+    {
+        printf("(null)\n");
+        return;
+    }
+
+    int *indices = calloc(arr->ndim > 0 ? arr->ndim : 1, sizeof(int));
+    if (!indices)
+    {
+        return;
+    }
+    cvec__print_recursive(arr, indices, 0, 0);
     printf(", shape: (");
     for (size_t i = 0; i < arr->ndim; i++)
     {
@@ -403,9 +505,8 @@ void ndarray_print(NDArray *arr)
             printf(", %d", arr->shape[i]);
         }
     }
-    printf(") -> %ld dims\n", arr->ndim);
+    printf(") -> %zu dims\n", arr->ndim);
     free(indices);
 }
-#endif // CVEC_H_
 
 #endif // CVEC_IMPLEMENTATION
