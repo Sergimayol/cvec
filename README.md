@@ -28,7 +28,7 @@ To use this library work like a [nothings/stb](https://github.com/nothings/stb) 
 | Views (no copy)  | `transpose`, `permute`, `reshape`, `slice`                                                         |
 | Elementwise      | `add`, `sub`, `mul`, `div` (with broadcasting) and `add_scalar`, `sub_scalar`, `mul_scalar`, `div_scalar` |
 | Matrix product   | `matmul_2d`, `matmul` (batched, batch dims are broadcast)                                          |
-| Reductions       | `sum`, `mean`, `min`, `max`, `norm_l1`, `norm_l2`                                                  |
+| Reductions       | `sum`, `mean`, `min`, `max`, `norm_l1`, `norm_l2`, and per axis: `sum_axis`, `mean_axis`, `min_axis`, `max_axis` |
 | Vector functions | `dot`, `euclidean_distance`, `manhattan_distance`, `cosine_similarity`, `cosine_distance`          |
 
 All functions are prefixed with `cvec_ndarray_`. Views share their data with the original array: free them with `cvec_ndarray_free` (it never frees data a view does not own) and don't use them after the original has been freed.

@@ -133,6 +133,18 @@ cvec_scalar cvec_ndarray_max(const cvec_NDArray *arr);
 cvec_scalar cvec_ndarray_norm_l1(const cvec_NDArray *arr);
 cvec_scalar cvec_ndarray_norm_l2(const cvec_NDArray *arr);
 
+// Reductions along one axis
+// -------------------------
+// Return a new array with `axis` reduced, or NULL if `arr` is NULL or `axis`
+// is out of range. Without `keepdims` the axis is removed from the shape (a 1-d
+// input gives an array of shape (1)); with `keepdims` non zero it is kept with
+// size 1, so the result broadcasts against `arr` (e.g. `x - mean_axis(x, 1, 1)`).
+// Over an empty axis sum gives 0 and mean, min and max give NAN.
+cvec_NDArray *cvec_ndarray_sum_axis(const cvec_NDArray *arr, int axis, int keepdims);
+cvec_NDArray *cvec_ndarray_mean_axis(const cvec_NDArray *arr, int axis, int keepdims);
+cvec_NDArray *cvec_ndarray_min_axis(const cvec_NDArray *arr, int axis, int keepdims);
+cvec_NDArray *cvec_ndarray_max_axis(const cvec_NDArray *arr, int axis, int keepdims);
+
 // Distances and dot product
 // -------------------------
 // `a` and `b` must have the same shape (any number of dims: the arrays are
@@ -1288,6 +1300,163 @@ cvec_scalar cvec_ndarray_norm_l2(const cvec_NDArray *arr)
         return NAN;
     }
     return (cvec_scalar)sqrt(out);
+}
+
+// ---------------------------------------------------------------------------
+// Reductions along one axis
+// ---------------------------------------------------------------------------
+
+typedef enum
+{
+    CVEC__AXIS_SUM,
+    CVEC__AXIS_MEAN,
+    CVEC__AXIS_MIN,
+    CVEC__AXIS_MAX,
+} cvec__axis_op;
+
+static cvec_NDArray *cvec__reduce_axis(const cvec_NDArray *arr, int axis, int keepdims, cvec__axis_op op)
+{
+    if (!arr || arr->ndim < 1 || axis < 0 || (size_t)axis >= arr->ndim)
+    {
+        return NULL;
+    }
+
+    size_t ndim = arr->ndim;
+    int len = arr->shape[axis];
+    ptrdiff_t axis_stride = arr->strides[axis];
+
+    // `reduced` is the shape of the result with the axis kept (size 1): walking
+    // it visits the first element of every lane along `axis`.
+    int *reduced = (int *)malloc(ndim * sizeof(int));
+    if (!reduced)
+    {
+        return NULL;
+    }
+    for (size_t i = 0; i < ndim; i++)
+    {
+        reduced[i] = arr->shape[i];
+    }
+    reduced[axis] = 1;
+
+    cvec_NDArray *res;
+    if (keepdims)
+    {
+        res = cvec_ndarray_create((int)ndim, reduced);
+    }
+    else if (ndim == 1)
+    {
+        int one = 1;
+        res = cvec_ndarray_create(1, &one);
+    }
+    else
+    {
+        int *out_shape = (int *)malloc((ndim - 1) * sizeof(int));
+        if (!out_shape)
+        {
+            free(reduced);
+            return NULL;
+        }
+        for (size_t i = 0, j = 0; i < ndim; i++)
+        {
+            if ((int)i != axis)
+            {
+                out_shape[j++] = arr->shape[i];
+            }
+        }
+        res = cvec_ndarray_create((int)ndim - 1, out_shape);
+        free(out_shape);
+    }
+    if (!res)
+    {
+        free(reduced);
+        return NULL;
+    }
+
+    size_t lanes = cvec_ndarray_size(res);
+    if (lanes == 0)
+    {
+        free(reduced);
+        return res;
+    }
+    if (len > 0 && !arr->data)
+    {
+        cvec_ndarray_free(res);
+        free(reduced);
+        return NULL;
+    }
+
+    cvec__iter it;
+    if (cvec__iter_init(&it, ndim, reduced, arr->strides, NULL) != 0)
+    {
+        cvec_ndarray_free(res);
+        free(reduced);
+        return NULL;
+    }
+
+    for (size_t lane = 0; lane < lanes; lane++)
+    {
+        if (len == 0)
+        {
+            res->data[lane] = op == CVEC__AXIS_SUM ? (cvec_scalar)0 : (cvec_scalar)NAN;
+        }
+        else
+        {
+            double acc = 0.0;
+            if (op == CVEC__AXIS_MIN)
+                acc = INFINITY;
+            else if (op == CVEC__AXIS_MAX)
+                acc = -INFINITY;
+
+            const cvec_scalar *p = arr->data + it.offset_a;
+            for (int k = 0; k < len; k++)
+            {
+                double x = (double)p[(ptrdiff_t)k * axis_stride];
+                switch (op)
+                {
+                case CVEC__AXIS_SUM:
+                case CVEC__AXIS_MEAN:
+                    acc += x;
+                    break;
+                case CVEC__AXIS_MIN:
+                    acc = x < acc ? x : acc;
+                    break;
+                case CVEC__AXIS_MAX:
+                    acc = x > acc ? x : acc;
+                    break;
+                }
+            }
+            if (op == CVEC__AXIS_MEAN)
+            {
+                acc /= (double)len;
+            }
+            res->data[lane] = (cvec_scalar)acc;
+        }
+        cvec__iter_next(&it);
+    }
+
+    cvec__iter_free(&it);
+    free(reduced);
+    return res;
+}
+
+cvec_NDArray *cvec_ndarray_sum_axis(const cvec_NDArray *arr, int axis, int keepdims)
+{
+    return cvec__reduce_axis(arr, axis, keepdims, CVEC__AXIS_SUM);
+}
+
+cvec_NDArray *cvec_ndarray_mean_axis(const cvec_NDArray *arr, int axis, int keepdims)
+{
+    return cvec__reduce_axis(arr, axis, keepdims, CVEC__AXIS_MEAN);
+}
+
+cvec_NDArray *cvec_ndarray_min_axis(const cvec_NDArray *arr, int axis, int keepdims)
+{
+    return cvec__reduce_axis(arr, axis, keepdims, CVEC__AXIS_MIN);
+}
+
+cvec_NDArray *cvec_ndarray_max_axis(const cvec_NDArray *arr, int axis, int keepdims)
+{
+    return cvec__reduce_axis(arr, axis, keepdims, CVEC__AXIS_MAX);
 }
 
 // ---------------------------------------------------------------------------

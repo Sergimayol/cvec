@@ -799,6 +799,107 @@ void test_reductions()
     cvec_ndarray_free(e);
 }
 
+void test_reductions_axis()
+{
+    // a = [[1, 2, 3],
+    //      [4, 5, 6]]
+    int shape[2] = {2, 3};
+    cvec_scalar buf[6] = {1, 2, 3, 4, 5, 6};
+    cvec_NDArray *a = cvec_ndarray_from_buffer(2, shape, buf);
+
+    cvec_NDArray *r = cvec_ndarray_sum_axis(a, 0, 0);
+    CHECK_EQ((int)r->ndim, 1);
+    CHECK_EQ(r->shape[0], 3);
+    CHECK_VALUES(r, 5, 7, 9);
+    cvec_ndarray_free(r);
+
+    r = cvec_ndarray_sum_axis(a, 1, 0);
+    CHECK_EQ(r->shape[0], 2);
+    CHECK_VALUES(r, 6, 15);
+    cvec_ndarray_free(r);
+
+    r = cvec_ndarray_mean_axis(a, 1, 0);
+    CHECK_VALUES(r, 2, 5);
+    cvec_ndarray_free(r);
+
+    r = cvec_ndarray_min_axis(a, 0, 0);
+    CHECK_VALUES(r, 1, 2, 3);
+    cvec_ndarray_free(r);
+
+    r = cvec_ndarray_max_axis(a, 1, 0);
+    CHECK_VALUES(r, 3, 6);
+    cvec_ndarray_free(r);
+
+    // keepdims: shape (2, 1), so it broadcasts against `a`
+    cvec_NDArray *m = cvec_ndarray_mean_axis(a, 1, 1);
+    CHECK_EQ((int)m->ndim, 2);
+    CHECK_EQ(m->shape[0], 2);
+    CHECK_EQ(m->shape[1], 1);
+    cvec_NDArray *centered = cvec_ndarray_sub(a, m);
+    CHECK_VALUES(centered, -1, 0, 1, -1, 0, 1);
+    cvec_ndarray_free(m);
+    cvec_ndarray_free(centered);
+
+    // strided input: transpose has shape (3, 2), so axis 0 sums the rows of a
+    cvec_NDArray *t = cvec_ndarray_transpose(a);
+    r = cvec_ndarray_sum_axis(t, 0, 0);
+    CHECK_VALUES(r, 6, 15);
+    cvec_ndarray_free(r);
+    r = cvec_ndarray_max_axis(t, 1, 0);
+    CHECK_VALUES(r, 4, 5, 6);
+    cvec_ndarray_free(r);
+
+    // 3-d, reduce the middle axis: shape (2, 2, 2) -> (2, 2)
+    int shape3[3] = {2, 2, 2};
+    cvec_scalar buf3[8] = {1, 2, 3, 4, 5, 6, 7, 8};
+    cvec_NDArray *c = cvec_ndarray_from_buffer(3, shape3, buf3);
+    r = cvec_ndarray_sum_axis(c, 1, 0);
+    CHECK_EQ((int)r->ndim, 2);
+    CHECK_VALUES(r, 4, 6, 12, 14);
+    cvec_ndarray_free(r);
+    r = cvec_ndarray_sum_axis(c, 1, 1);
+    CHECK_EQ((int)r->ndim, 3);
+    CHECK_EQ(r->shape[1], 1);
+    cvec_ndarray_free(r);
+
+    // 1-d input gives shape (1)
+    int shape1[1] = {4};
+    cvec_scalar buf1[4] = {1, 2, 3, 4};
+    cvec_NDArray *v = cvec_ndarray_from_buffer(1, shape1, buf1);
+    r = cvec_ndarray_sum_axis(v, 0, 0);
+    CHECK_EQ((int)r->ndim, 1);
+    CHECK_EQ(r->shape[0], 1);
+    CHECK_VALUES(r, 10);
+    cvec_ndarray_free(r);
+
+    // empty axis
+    int shape_e[2] = {2, 0};
+    cvec_NDArray *e = cvec_ndarray_create(2, shape_e);
+    r = cvec_ndarray_sum_axis(e, 1, 0);
+    CHECK_VALUES(r, 0, 0);
+    cvec_ndarray_free(r);
+    r = cvec_ndarray_mean_axis(e, 1, 0);
+    CHECK_NAN(r->data[0]);
+    cvec_ndarray_free(r);
+    // reducing another axis of an empty array gives an empty result
+    r = cvec_ndarray_sum_axis(e, 0, 0);
+    CHECK_EQ((int)cvec_ndarray_size(r), 0);
+    cvec_ndarray_free(r);
+
+    // invalid
+    CHECK_NULL(cvec_ndarray_sum_axis(a, 2, 0));
+    CHECK_NULL(cvec_ndarray_sum_axis(a, -1, 0));
+    CHECK_NULL(cvec_ndarray_sum_axis(NULL, 0, 0));
+
+    PASS("test_reductions_axis");
+
+    cvec_ndarray_free(a);
+    cvec_ndarray_free(t);
+    cvec_ndarray_free(c);
+    cvec_ndarray_free(v);
+    cvec_ndarray_free(e);
+}
+
 void test_dot_and_metrics()
 {
     int shape[1] = {3};
@@ -882,6 +983,7 @@ int main()
     test_elementwise();
     test_matmul_broadcast();
     test_reductions();
+    test_reductions_axis();
     test_dot_and_metrics();
 
     printf("All tests passed!\n");
