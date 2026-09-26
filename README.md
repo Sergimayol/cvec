@@ -17,6 +17,21 @@ To use this library work like a [nothings/stb](https://github.com/nothings/stb) 
 | ------------------------- | --------------------------------------------------------------------- |
 | `CVEC_IMPLEMENTATION`     | Must be defined in **one** source file to compile the implementation. |
 | `CVEC_ALLOW_PARALLEL_OPS` | Enables parallel operations (requires OpenMP).                        |
+| `CVEC_DTYPE`              | Element type, `float` by default (e.g. `#define CVEC_DTYPE double`).  |
+
+## Features
+
+| Area             | Functions                                                                                          |
+| ---------------- | -------------------------------------------------------------------------------------------------- |
+| Creation         | `create`, `zeros`, `ones`, `full`, `from_buffer`, `copy`, `free`                                   |
+| Element access   | `get`, `set`, `get_index`, `size`, `print`                                                         |
+| Views (no copy)  | `transpose`, `permute`, `reshape`, `slice`                                                         |
+| Elementwise      | `add`, `sub`, `mul`, `div` (with broadcasting) and `add_scalar`, `sub_scalar`, `mul_scalar`, `div_scalar` |
+| Matrix product   | `matmul_2d`, `matmul` (batched, batch dims are broadcast)                                          |
+| Reductions       | `sum`, `mean`, `min`, `max`, `norm_l1`, `norm_l2`                                                  |
+| Vector functions | `dot`, `euclidean_distance`, `manhattan_distance`, `cosine_similarity`, `cosine_distance`          |
+
+All functions are prefixed with `cvec_ndarray_`. Views share their data with the original array: free them with `cvec_ndarray_free` (it never frees data a view does not own) and don't use them after the original has been freed.
 
 ## Naming
 
